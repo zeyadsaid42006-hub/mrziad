@@ -1590,6 +1590,8 @@ function hideSplash(auto) {
   localStorage.setItem('splashSeen','1');
   document.getElementById('splash').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
+  // Set base history state so back from login exits naturally
+  history.replaceState({ view: 'login' }, '', location.pathname);
 }
 
 // =============================================
@@ -1675,7 +1677,6 @@ function _enterAdminMode() {
   document.getElementById('topbarUser').textContent = 'Mr. Zeyad Said';
   document.getElementById('videoAdminBtns').style.display = 'flex';
   document.getElementById('studentAdminBtns').style.display = 'flex';
-  // show all admin UI
   document.querySelectorAll('.admin-only').forEach(el => el.style.display = '');
   document.getElementById('sidebar').style.display = 'block';
   document.getElementById('sidebarToggleBtn').style.display = '';
@@ -1684,6 +1685,8 @@ function _enterAdminMode() {
   updateTermBadge();
   loadAllData();
   loadArchivedMonths();
+  // Push a clean base state then navigate to students
+  history.replaceState({ view: 'login' }, '', location.pathname);
   showTab('students');
 }
 
@@ -1710,6 +1713,9 @@ function _enterStudentMode(name, gradeLabel) {
   mc.classList.add('student-mode');
   document.getElementById('topbarUser').textContent = name || '';
   document.getElementById('termBadge').textContent  = gradeLabel || '';
+  // Push base state then student tab
+  history.replaceState({ view: 'login' }, '', location.pathname);
+  showTab('student-videos');
 }
 
 // ── Parent mode helper: shows ONLY the parent tab ──
@@ -1735,6 +1741,8 @@ function _enterParentMode(name, gradeLabel) {
   mc.classList.add('student-mode');
   document.getElementById('topbarUser').textContent = name || '';
   document.getElementById('termBadge').textContent  = gradeLabel || '';
+  history.replaceState({ view: 'login' }, '', location.pathname);
+  showTab('parent');
 }
 
 function _enterAssistantMode(matched) {
@@ -1751,6 +1759,7 @@ function _enterAssistantMode(matched) {
   document.getElementById('studentAdminBtns').style.display = 'none';
   updateTermBadge();
   loadAllData();
+  history.replaceState({ view: 'login' }, '', location.pathname);
   showTab('students');
 }
 
@@ -1766,6 +1775,7 @@ function _enterObserverMode(matched) {
   document.getElementById('studentAdminBtns').style.display = 'none';
   updateTermBadge();
   loadAllData();
+  history.replaceState({ view: 'login' }, '', location.pathname);
   showTab('students');
   _applyObserverMode();
 }
@@ -1972,6 +1982,8 @@ function doLogout() {
   document.getElementById('loginPass').value = '';
   safeLocked = true;
   if (scannerRunning) stopScanner();
+  // Clear any hash from URL
+  history.replaceState({ view: 'login' }, '', location.pathname);
   // Restore ALL tab-pages visibility
   document.querySelectorAll('.tab-page').forEach(p => {
     p.style.display = '';
@@ -2478,7 +2490,11 @@ function loadCodesOnce() {
 // =============================================
 // NAVIGATION
 // =============================================
-function showTab(tab) {
+
+// ── History / Back-button support ──
+let _navLock = false;
+
+function showTab(tab, pushHistory = true) {
   // Students can only access their own portal
   if (currentUser === 'student' && tab !== 'student-videos') return;
   if (currentUser === 'parent'  && tab !== 'parent') return;
@@ -2505,7 +2521,34 @@ function showTab(tab) {
     loadAssistantAccountUI(); loadObserverAccountUI(); loadStudentAccountsForAdmin(); loadPaymentSettings();
     loadGroupLinks().then(() => renderGroupLinksAdmin());
   }
+
+  if (pushHistory && !_navLock) {
+    history.pushState({ tab }, '', '#' + tab);
+  }
 }
+
+// ── popstate: handle back/forward button ──
+window.addEventListener('popstate', (e) => {
+  _navLock = true;
+
+  // First: close any open modal
+  const openModal = document.querySelector('.modal-backdrop.open');
+  if (openModal) {
+    openModal.classList.remove('open');
+    _navLock = false;
+    return;
+  }
+
+  const state = e.state;
+  if (state && state.tab) {
+    showTab(state.tab, false);
+  } else {
+    // Reached the bottom of history — logout
+    if (currentUser) doLogout();
+  }
+
+  _navLock = false;
+});
 
 function toggleSidebar() {
   sidebarCollapsed = !sidebarCollapsed;
@@ -2532,9 +2575,23 @@ function toast(msg, type='info', dur=3200) {
 // =============================================
 // MODALS
 // =============================================
-function openModal(id)  { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-document.addEventListener('click', e => { if (e.target.classList.contains('modal-backdrop')) e.target.classList.remove('open'); });
+function openModal(id) {
+  document.getElementById(id).classList.add('open');
+  if (!_navLock) history.pushState({ modal: id }, '', '#modal-' + id);
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  // Only go back if the current URL matches this modal (avoid double-back)
+  if (location.hash === '#modal-' + id) history.back();
+}
+
+// Clicking outside modal (on backdrop) closes it
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-backdrop') && e.target.classList.contains('open')) {
+    e.target.classList.remove('open');
+    if (location.hash.startsWith('#modal-')) history.back();
+  }
+});
 
 // =============================================
 // BEEP
