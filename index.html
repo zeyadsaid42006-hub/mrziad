@@ -1154,7 +1154,7 @@
         </div>
       </div>
       <!-- Fixed subscription price display -->
-      <div id="subPriceDisplay" style="display:none;margin-top:14px;background:linear-gradient(135deg,rgba(229,57,53,0.15),rgba(255,107,53,0.1));border:1px solid rgba(229,57,53,0.4);border-radius:var(--radius-sm);padding:14px;text-align:center">
+      <div id="subPriceDisplay" style="display:none;margin-top:14px;background:linear-gradient(135deg,rgba(56,189,248,0.12),rgba(52,211,153,0.08));border:1px solid rgba(56,189,248,0.35);border-radius:var(--radius-sm);padding:14px;text-align:center">
         <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px">سعر الاشتراك الشهري</div>
         <div id="subPriceValue" style="font-size:2rem;font-weight:900;color:var(--warning)">— جنيه</div>
         <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">حوّل هذا المبلغ بالضبط</div>
@@ -2083,10 +2083,8 @@ function processCardPayment() {
   if (!cardName)            { toast(isAr?'أدخل الاسم على البطاقة':'Enter cardholder name','error'); return; }
   if (!amount)              { toast(isAr?'أدخل المبلغ':'Enter amount','error'); return; }
 
-  // Mask card number for receipt (show last 4 only)
   const maskedCard = '**** **** **** ' + cardNum.slice(-4);
   const grade = currentStudent?.grade || '';
-  const code  = currentStudent?.code || currentStudent?.customCode || '';
 
   const msg = encodeURIComponent(
     `💳 طلب دفع بالبطاقة — General Academy\n` +
@@ -2094,7 +2092,6 @@ function processCardPayment() {
     `👤 الاسم: ${cardName}\n` +
     `📱 الهاتف: ${phone}\n` +
     `🎓 المرحلة: ${grade}\n` +
-    `🔑 الكود: ${code||'—'}\n` +
     `💳 البطاقة: ${maskedCard}\n` +
     `📅 الانتهاء: ${cardExpiry}\n` +
     `💵 المبلغ: ${amount} جنيه\n` +
@@ -2159,14 +2156,12 @@ function sendPaymentToAdmin() {
   if (!name)   { toast(isAr?'أدخل اسمك':'Enter your name','error'); return; }
 
   const grade = currentStudent?.grade || '';
-  const code  = currentStudent?.activeCode || currentStudent?.code || currentStudent?.customCode || '';
   const msg = encodeURIComponent(
     `✅ إيصال دفع — General Academy\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
     `👤 الاسم: ${name}\n` +
     `📱 الهاتف: ${phone}\n` +
     `🎓 المرحلة: ${grade}\n` +
-    `🔑 الكود: ${code||'—'}\n` +
     `💳 طريقة الدفع: ${method}\n` +
     `💵 المبلغ: ${amount} جنيه\n` +
     `━━━━━━━━━━━━━━━━━━━━\n` +
