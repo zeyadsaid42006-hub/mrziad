@@ -199,7 +199,7 @@
         <button class="lang-btn" data-lang="en" onclick="setLang('en')">EN</button>
       </div>
       <button class="btn-icon admin-only" onclick="openChangePass()" title="Change Password"><i class="fas fa-key"></i></button>
-      <button class="btn-icon" onclick="doLogout()" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
+      <button class="btn-icon logout-btn" onclick="doLogout()" title="Logout"><i class="fas fa-sign-out-alt"></i></button>
     </div>
   </div>
 
@@ -1565,32 +1565,70 @@ window.onload = () => {
   setLang(currentLang);
   
   // ── Restore session after refresh ──
-  const savedToken = localStorage.getItem('sessionToken');
-  const savedId    = localStorage.getItem('sessionId');
-  if (savedToken && savedId) {
-    // Check if session is still valid
+  const savedToken   = localStorage.getItem('sessionToken');
+  const savedId      = localStorage.getItem('sessionId');
+  const savedRole    = localStorage.getItem('sessionRole');    // admin / assistant / observer / student
+  const savedPhone   = localStorage.getItem('sessionPhone');
+  const savedPass    = localStorage.getItem('sessionPass');
+
+  if (savedRole === 'admin' && savedPhone && savedPass) {
+    // Restore admin session
+    db.ref('settings').once('value', snap => {
+      const s = snap.val() || {};
+      if (s.adminPass) ADMIN_PASS  = s.adminPass;
+      if (s.safePin)   SAFE_PIN    = s.safePin;
+      if (s.adminPhone) ADMIN_PHONE = s.adminPhone;
+      if (savedPhone === (s.adminPhone || ADMIN_PHONE) && savedPass === (s.adminPass || ADMIN_PASS)) {
+        _enterAdminMode();
+      } else {
+        _clearSession(); _showLoginScreen();
+      }
+    }).catch(() => {
+      if (savedPhone === ADMIN_PHONE && savedPass === ADMIN_PASS) _enterAdminMode();
+      else { _clearSession(); _showLoginScreen(); }
+    });
+    return;
+  }
+
+  if (savedRole === 'assistant' && savedPhone) {
+    db.ref('settings/assistants').once('value', snap => {
+      const asts = snap.val() || [];
+      const matched = asts.find(a => a.phone === savedPhone && a.pass === savedPass);
+      if (matched) _enterAssistantMode(matched);
+      else { _clearSession(); _showLoginScreen(); }
+    }).catch(() => { _clearSession(); _showLoginScreen(); });
+    return;
+  }
+
+  if (savedRole === 'observer' && savedPhone) {
+    db.ref('settings/observers').once('value', snap => {
+      const obs = snap.val() || [];
+      const matched = obs.find(o => o.phone === savedPhone && o.pass === savedPass);
+      if (matched) _enterObserverMode(matched);
+      else { _clearSession(); _showLoginScreen(); }
+    }).catch(() => { _clearSession(); _showLoginScreen(); });
+    return;
+  }
+
+  if (savedRole === 'student' && savedToken && savedId) {
     db.ref(`studentAccounts/${savedId}`).once('value', snap => {
       const acc = snap.val();
       if (acc && acc.sessionToken === savedToken) {
-        // Session still valid — restore
         currentUser    = 'student';
         currentStudent = { ...acc, customCode: acc.code };
         _enterStudentMode(acc.name, acc.grade);
         _startSessionWatch(savedId, savedToken);
         loadAllData().then(() => { renderStudentVideos(); });
-        // Restore last tab from URL hash
-        const hash = location.hash.replace('#', '');
+        const hash = location.hash.replace('#','');
         if (hash && !hash.startsWith('modal-')) showTab(hash, false);
         return;
       }
-      // Session expired — clear & show login
-      localStorage.removeItem('sessionToken');
-      localStorage.removeItem('sessionId');
-      _showLoginScreen();
-    }).catch(() => _showLoginScreen());
-  } else {
-    _showLoginScreen();
+      _clearSession(); _showLoginScreen();
+    }).catch(() => { _clearSession(); _showLoginScreen(); });
+    return;
   }
+
+  _showLoginScreen();
   
   function _showLoginScreen() {
     // Load settings from Firebase (password/pin may have been changed)
@@ -1722,6 +1760,10 @@ function doAdminLogin() {
 
 function _enterAdminMode() {
   currentUser = 'admin';
+  // Save admin session for refresh restore
+  localStorage.setItem('sessionRole',  'admin');
+  localStorage.setItem('sessionPhone', ADMIN_PHONE);
+  localStorage.setItem('sessionPass',  ADMIN_PASS);
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('nav-safe').style.display = 'flex';
@@ -1799,6 +1841,9 @@ function _enterParentMode(name, gradeLabel) {
 
 function _enterAssistantMode(matched) {
   currentUser = 'assistant';
+  localStorage.setItem('sessionRole',  'assistant');
+  localStorage.setItem('sessionPhone', matched.phone || '');
+  localStorage.setItem('sessionPass',  matched.pass  || '');
   currentAssistantCenter = matched.centerName || '';
   currentAssistantType   = matched.assistantType || 'center';
   document.getElementById('loginScreen').style.display = 'none';
@@ -1817,6 +1862,9 @@ function _enterAssistantMode(matched) {
 
 function _enterObserverMode(matched) {
   currentUser = 'observer';
+  localStorage.setItem('sessionRole',  'observer');
+  localStorage.setItem('sessionPhone', matched.phone || '');
+  localStorage.setItem('sessionPass',  matched.pass  || '');
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('nav-safe').style.display = 'none';
@@ -1909,7 +1957,8 @@ function _doStudentLoginCore(input, pass, err, resetBtn) {
       // ── Single-device session: write a token & kick other devices ──
       const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
       localStorage.setItem('sessionToken', token);
-      localStorage.setItem('sessionId', acc.id);
+      localStorage.setItem('sessionId',    acc.id);
+      localStorage.setItem('sessionRole',  'student');
       db.ref(`studentAccounts/${acc.id}/sessionToken`).set(token);
       _enterStudentMode(acc.name, acc.grade);
       const sc = document.getElementById('studentVideosContent');
@@ -2086,6 +2135,14 @@ function doRegister() {
   });
 }
 
+function _clearSession() {
+  localStorage.removeItem('sessionToken');
+  localStorage.removeItem('sessionId');
+  localStorage.removeItem('sessionRole');
+  localStorage.removeItem('sessionPhone');
+  localStorage.removeItem('sessionPass');
+}
+
 // ── Single Device Session Watcher ──
 function _startSessionWatch(accountId, myToken) {
   if (!accountId || !myToken) return;
@@ -2111,8 +2168,7 @@ function doLogout() {
   safeLocked = true;
   if (scannerRunning) stopScanner();
   // Clear session token
-  localStorage.removeItem('sessionToken');
-  localStorage.removeItem('sessionId');
+  _clearSession();
   if (window._sessionWatcher) window._sessionWatcher.off();
   // Clear any hash from URL
   history.replaceState({ view: 'login' }, '', location.pathname);
