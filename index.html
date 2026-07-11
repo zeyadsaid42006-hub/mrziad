@@ -71,21 +71,20 @@
       </div>
     </div>
     <div class="login-logo">
-      <div class="login-icon">
+      <div class="login-icon" onclick="_adminTapCount()" style="cursor:pointer" title="">
         <img src="https://i.postimg.cc/TLsbjGkk/photo-2026-07-08-22-02-01-(2).jpg" alt="General Academy" onerror="this.outerHTML='<i class=\'fas fa-graduation-cap\'></i>'">
       </div>
       <h2>General Academy</h2>
       <p>Mr. Zeyad Said — English Language</p>
     </div>
     <div class="tab-switch" id="loginTabs">
-      <button class="active" onclick="switchLoginTab('admin')"><i class="fas fa-user-shield"></i> Admin</button>
-      <button onclick="switchLoginTab('student')"><i class="fas fa-user-graduate"></i> Student</button>
-      <button onclick="switchLoginTab('register')"><i class="fas fa-user-plus"></i> Register</button>
-      <button onclick="switchLoginTab('parent')"><i class="fas fa-users"></i> Parent</button>
+      <button class="active" onclick="switchLoginTab('student')"><i class="fas fa-sign-in-alt"></i> تسجيل دخول</button>
+      <button onclick="switchLoginTab('register')"><i class="fas fa-user-plus"></i> إنشاء حساب</button>
+      <button onclick="switchLoginTab('parent')"><i class="fas fa-users"></i> ولي أمر</button>
     </div>
 
-    <!-- Admin Login -->
-    <div id="adminLoginForm">
+    <!-- Admin Login — hidden, triggered by secret tap or keyboard shortcut -->
+    <div id="adminLoginForm" style="display:none">
       <div class="form-group">
         <label>رقم الهاتف</label>
         <input type="tel" id="loginPhone" class="form-control" placeholder="01XXXXXXXXX"
@@ -103,7 +102,7 @@
     </div>
 
     <!-- Student Login (by code or phone+password) -->
-    <div id="studentLoginForm" style="display:none">
+    <div id="studentLoginForm">
       <div class="info-box"><i class="fas fa-info-circle"></i> سجل دخول بكودك أو برقم هاتفك وكلمة المرور</div>
       <div class="form-group">
         <label>كود الطالب / رقم الواتساب</label>
@@ -118,7 +117,10 @@
           <button type="button" onclick="toggleVis('studentPass','eyeStudPass')"><i class="fas fa-eye" id="eyeStudPass"></i></button>
         </div>
       </div>
-      <button class="btn btn-primary w-100" onclick="doStudentLogin()"><i class="fas fa-play-circle"></i> دخول</button>
+      <button class="btn btn-primary w-100" onclick="doStudentLogin()"><i class="fas fa-sign-in-alt"></i> دخول</button>
+      <p style="text-align:center;margin-top:12px;font-size:0.85rem;color:var(--text-muted)">
+        ما عندكش حساب؟ <a href="#" onclick="switchLoginTab('register')" style="color:var(--accent)">إنشاء حساب جديد</a>
+      </p>
     </div>
 
     <!-- Student Register -->
@@ -557,7 +559,7 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Name</th><th>Phone</th><th>Grade</th><th>Code</th><th>Joined</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Name</th><th>Phone</th><th>Parent Phone</th><th>Grade</th><th>Code</th><th>Joined</th><th>Actions</th></tr></thead>
               <tbody id="stuAccBody"></tbody>
             </table>
           </div>
@@ -1445,14 +1447,16 @@ function applyLangUI() {
   document.documentElement.dir  = L.dir;
   document.body.dir              = L.dir;
 
-  // ── Login tabs (4 tabs: admin / student / register / parent) ──
+  // ── Login tabs (3 visible tabs: تسجيل دخول / إنشاء حساب / ولي أمر) ──
   const tabBtns = document.querySelectorAll('#loginTabs button');
-  const tabKeys = ['admin','student','register','parent'];
-  tabBtns.forEach((b,i) => {
-    const icon = b.querySelector('i');
-    b.textContent = '';
-    if (icon) b.appendChild(icon);
-    b.append('\u00a0' + (L[tabKeys[i]] || tabKeys[i]));
+  const tabLabels = [
+    { icon: 'fa-sign-in-alt',  ar: 'تسجيل دخول', en: 'Login'     },
+    { icon: 'fa-user-plus',    ar: 'إنشاء حساب',  en: 'Register'  },
+    { icon: 'fa-users',        ar: 'ولي أمر',      en: 'Parent'    },
+  ];
+  tabBtns.forEach((b, i) => {
+    const lbl = tabLabels[i]; if (!lbl) return;
+    b.innerHTML = `<i class="fas ${lbl.icon}"></i> ${isAr ? lbl.ar : lbl.en}`;
   });
 
   // ── Login form labels ──
@@ -1559,28 +1563,56 @@ window.onload = () => {
   populateGradeSelects();
   // Apply saved language
   setLang(currentLang);
-  // Load settings from Firebase (password/pin may have been changed)
-  db.ref('settings').once('value', snap => {
-    const s = snap.val() || {};
-    // Always keep the fixed admin phone, but respect changed password/pin
-    if (s.adminPass)  ADMIN_PASS  = s.adminPass;
-    if (s.safePin)    SAFE_PIN    = s.safePin;
-    if (s.adminPhone) ADMIN_PHONE = s.adminPhone;
-    // Ensure the admin account is written to Firebase if not there
-    if (!s.adminPhone) {
-      db.ref('settings').update({ adminPhone: ADMIN_PHONE, adminPass: ADMIN_PASS, safePin: SAFE_PIN });
-    }
-    if (localStorage.getItem('splashSeen')) hideSplash(true);
-    else {
-      document.getElementById('splash').style.display = 'flex';
-    }
-  }).catch(() => {
-    // Firebase unreachable — still allow login with local credentials
-    if (localStorage.getItem('splashSeen')) hideSplash(true);
-    else {
-      document.getElementById('splash').style.display = 'flex';
-    }
-  });
+  
+  // ── Restore session after refresh ──
+  const savedToken = localStorage.getItem('sessionToken');
+  const savedId    = localStorage.getItem('sessionId');
+  if (savedToken && savedId) {
+    // Check if session is still valid
+    db.ref(`studentAccounts/${savedId}`).once('value', snap => {
+      const acc = snap.val();
+      if (acc && acc.sessionToken === savedToken) {
+        // Session still valid — restore
+        currentUser    = 'student';
+        currentStudent = { ...acc, customCode: acc.code };
+        _enterStudentMode(acc.name, acc.grade);
+        _startSessionWatch(savedId, savedToken);
+        loadAllData().then(() => { renderStudentVideos(); });
+        // Restore last tab from URL hash
+        const hash = location.hash.replace('#', '');
+        if (hash && !hash.startsWith('modal-')) showTab(hash, false);
+        return;
+      }
+      // Session expired — clear & show login
+      localStorage.removeItem('sessionToken');
+      localStorage.removeItem('sessionId');
+      _showLoginScreen();
+    }).catch(() => _showLoginScreen());
+  } else {
+    _showLoginScreen();
+  }
+  
+  function _showLoginScreen() {
+    // Load settings from Firebase (password/pin may have been changed)
+    db.ref('settings').once('value', snap => {
+      const s = snap.val() || {};
+      if (s.adminPass)  ADMIN_PASS  = s.adminPass;
+      if (s.safePin)    SAFE_PIN    = s.safePin;
+      if (s.adminPhone) ADMIN_PHONE = s.adminPhone;
+      if (!s.adminPhone) {
+        db.ref('settings').update({ adminPhone: ADMIN_PHONE, adminPass: ADMIN_PASS, safePin: SAFE_PIN });
+      }
+      if (localStorage.getItem('splashSeen')) hideSplash(true);
+      else {
+        document.getElementById('splash').style.display = 'flex';
+      }
+    }).catch(() => {
+      if (localStorage.getItem('splashSeen')) hideSplash(true);
+      else {
+        document.getElementById('splash').style.display = 'flex';
+      }
+    });
+  }
 };
 
 // =============================================
@@ -1590,6 +1622,8 @@ function hideSplash(auto) {
   localStorage.setItem('splashSeen','1');
   document.getElementById('splash').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
+  // Make sure student tab is shown by default
+  switchLoginTab('student');
   // Set base history state so back from login exits naturally
   history.replaceState({ view: 'login' }, '', location.pathname);
 }
@@ -1621,16 +1655,34 @@ function doSetup() {
 // AUTH
 // =============================================
 function switchLoginTab(tab) {
-  const tabOrder = ['admin','student','register','parent'];
+  const tabOrder = ['student','register','parent'];
   document.querySelectorAll('#loginTabs button').forEach((b,i) => {
     b.classList.toggle('active', tabOrder[i] === tab);
   });
-  document.getElementById('adminLoginForm').style.display    = tab==='admin'    ? 'block':'none';
-  document.getElementById('studentLoginForm').style.display  = tab==='student'  ? 'block':'none';
-  document.getElementById('registerForm').style.display      = tab==='register' ? 'block':'none';
+  document.getElementById('adminLoginForm').style.display   = tab==='admin'    ? 'block' : 'none';
+  document.getElementById('studentLoginForm').style.display = tab==='student'  ? 'block' : 'none';
+  document.getElementById('registerForm').style.display     = tab==='register' ? 'block' : 'none';
   const pf = document.getElementById('parentLoginForm');
   if (pf) pf.style.display = tab==='parent' ? 'block' : 'none';
   document.getElementById('loginErr').style.display = 'none';
+}
+
+// ── Secret admin access: tap logo 5 times ──
+let _adminTaps = 0, _adminTapTimer = null;
+function _adminTapCount() {
+  _adminTaps++;
+  clearTimeout(_adminTapTimer);
+  _adminTapTimer = setTimeout(() => { _adminTaps = 0; }, 2000);
+  if (_adminTaps >= 5) {
+    _adminTaps = 0;
+    document.getElementById('adminLoginForm').style.display = 'block';
+    document.getElementById('studentLoginForm').style.display = 'none';
+    document.getElementById('registerForm').style.display = 'none';
+    const pf2 = document.getElementById('parentLoginForm');
+    if (pf2) pf2.style.display = 'none';
+    document.querySelectorAll('#loginTabs button').forEach(b => b.classList.remove('active'));
+    document.getElementById('loginPhone').focus();
+  }
 }
 function doAdminLogin() {
   const phone = document.getElementById('loginPhone').value.trim();
@@ -1791,6 +1843,39 @@ function doStudentLogin() {
   if (loginBtn) { loginBtn.disabled = true; loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الدخول...'; }
   const resetBtn = () => { if (loginBtn) { loginBtn.disabled = false; loginBtn.innerHTML = '<i class="fas fa-play-circle"></i> دخول'; } };
 
+  // ── Check if admin is logging in via student form ──
+  if (input === ADMIN_PHONE && pass === ADMIN_PASS) {
+    resetBtn();
+    _enterAdminMode();
+    return;
+  }
+  // Also check Firebase in case credentials changed
+  db.ref('settings').once('value', snapS => {
+    const s = snapS.val() || {};
+    if (s.adminPhone && input === s.adminPhone && pass === (s.adminPass || ADMIN_PASS)) {
+      resetBtn();
+      _enterAdminMode();
+      return;
+    }
+    // Check assistants
+    const asts = s.assistants || [];
+    const matchedAst = asts.find(a => a.phone === input && a.pass === pass);
+    if (matchedAst) { resetBtn(); _enterAssistantMode(matchedAst); return; }
+    // Check observers
+    const obs = s.observers || [];
+    const matchedObs = obs.find(o => o.phone === input && o.pass === pass);
+    if (matchedObs) { resetBtn(); _enterObserverMode(matchedObs); return; }
+
+    // Proceed with normal student login
+    _doStudentLoginCore(input, pass, err, resetBtn);
+  }).catch(() => {
+    // Firebase unreachable — try local admin check only
+    if (input === ADMIN_PHONE && pass === ADMIN_PASS) { resetBtn(); _enterAdminMode(); return; }
+    _doStudentLoginCore(input, pass, err, resetBtn);
+  });
+}
+
+function _doStudentLoginCore(input, pass, err, resetBtn) {
   // 1) Try studentAccounts (registered accounts) by phone or code
   db.ref('studentAccounts').once('value', snapAcc => {
     const accounts = snapAcc.val() || {};
@@ -1821,14 +1906,23 @@ function doStudentLogin() {
     if (acc) {
       currentUser    = 'student';
       currentStudent = { ...acc, customCode: acc.code };
+      // ── Single-device session: write a token & kick other devices ──
+      const token = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      localStorage.setItem('sessionToken', token);
+      localStorage.setItem('sessionId', acc.id);
+      db.ref(`studentAccounts/${acc.id}/sessionToken`).set(token);
       _enterStudentMode(acc.name, acc.grade);
       const sc = document.getElementById('studentVideosContent');
       if (sc) sc.innerHTML = `<div class="empty-state"><i class="fas fa-spinner fa-spin" style="color:var(--accent)"></i><p>جاري التحميل...</p></div>`;
-      // Re-fetch full account data to get unlockedVideos & subscription
+      // Re-fetch full account data
       db.ref(`studentAccounts/${acc.id}`).once('value', snapFull => {
         if (snapFull.val()) currentStudent = { ...snapFull.val(), customCode: snapFull.val().code };
+        _startSessionWatch(acc.id, token);
         loadAllData().then(() => { renderStudentVideos(); });
-      }).catch(() => { loadAllData().then(() => { renderStudentVideos(); }); });
+      }).catch(() => {
+        _startSessionWatch(acc.id, token);
+        loadAllData().then(() => { renderStudentVideos(); });
+      });
       resetBtn();
       return;
     }
@@ -1937,25 +2031,44 @@ function doRegister() {
   const doSave = () => {
     const code = 'ST' + Date.now().toString().slice(-6);
     const id   = db.ref('studentAccounts').push().key;
-    db.ref(`studentAccounts/${id}`).set({
+    const accData = {
       id, name, phone, parentPhone: parentPhone || '', grade, pass, code,
       createdAt: Date.now(),
       status: 'active'
-    }).then(() => {
-      currentUser    = 'student';
-      currentStudent = { id, name, phone, grade, customCode: code };
-      _enterStudentMode(name, grade);
-      loadAllData().then(() => showTab('student-videos'));
-      toast(`مرحباً ${name}! كودك: ${code} 🎓`, 'success', 5000);
-      resetBtn();
-    }).catch(e => {
-      const isPermission = e.message && (e.message.includes('PERMISSION_DENIED') || e.message.includes('permission'));
-      err.textContent = isPermission
-        ? '❌ Firebase غير مسموح — تواصل مع الأدمن لفتح الصلاحيات'
-        : 'خطأ في الحفظ: ' + e.message;
-      err.style.display = 'block';
-      resetBtn();
-    });
+    };
+    
+    // Save to studentAccounts
+    db.ref(`studentAccounts/${id}`).set(accData)
+      .then(() => {
+        // ALSO add to main students list automatically
+        const studentData = {
+          id, name, phone: phone || 'none', 
+          parentPhone: parentPhone || '',
+          grade, customCode: code,
+          type: 'private', status: 'active',
+          joinDate: new Date().toISOString().split('T')[0],
+          createdAt: Date.now(),
+          monthlyFee: 0, feeExempt: false,
+          notes: 'تسجيل ذاتي عبر الموقع'
+        };
+        return db.ref(`students/${id}`).set(studentData);
+      })
+      .then(() => {
+        currentUser    = 'student';
+        currentStudent = { id, name, phone, grade, customCode: code };
+        _enterStudentMode(name, grade);
+        loadAllData().then(() => showTab('student-videos'));
+        toast(`مرحباً ${name}! كودك: ${code} 🎓`, 'success', 5000);
+        resetBtn();
+      })
+      .catch(e => {
+        const isPermission = e.message && (e.message.includes('PERMISSION_DENIED') || e.message.includes('permission'));
+        err.textContent = isPermission
+          ? '❌ Firebase غير مسموح — تواصل مع الأدمن لفتح الصلاحيات'
+          : 'خطأ في الحفظ: ' + e.message;
+        err.style.display = 'block';
+        resetBtn();
+      });
   };
 
   // Check phone not already registered
@@ -1973,6 +2086,21 @@ function doRegister() {
   });
 }
 
+// ── Single Device Session Watcher ──
+function _startSessionWatch(accountId, myToken) {
+  if (!accountId || !myToken) return;
+  const ref = db.ref(`studentAccounts/${accountId}/sessionToken`);
+  window._sessionWatcher = ref;
+  ref.on('value', snap => {
+    const serverToken = snap.val();
+    if (serverToken && serverToken !== myToken) {
+      // Another device logged in — kick this one
+      toast('تم تسجيل الدخول من جهاز آخر. جاري الخروج...', 'warning', 4000);
+      setTimeout(() => { if (currentUser === 'student') doLogout(); }, 2000);
+    }
+  });
+}
+
 function doLogout() {
   currentUser = null; currentStudent = null;
   parentStudentId = null; parentStudentIds = [];
@@ -1982,6 +2110,10 @@ function doLogout() {
   document.getElementById('loginPass').value = '';
   safeLocked = true;
   if (scannerRunning) stopScanner();
+  // Clear session token
+  localStorage.removeItem('sessionToken');
+  localStorage.removeItem('sessionId');
+  if (window._sessionWatcher) window._sessionWatcher.off();
   // Clear any hash from URL
   history.replaceState({ view: 'login' }, '', location.pathname);
   // Restore ALL tab-pages visibility
@@ -2814,7 +2946,11 @@ function renderStudentsTable() {
     return `<tr style="${isLeft?'opacity:0.55':''}">
       <td>${i+1}</td>
       <td><strong>${s.name}</strong>${isLeft?` <span class="badge badge-secondary" style="font-size:0.7rem">Left</span>`:''}
-        ${s.phone && s.phone!=='none' ? `<br><a href="https://wa.me/2${s.phone}" target="_blank" style="font-size:0.75rem;color:#25d366"><i class="fab fa-whatsapp"></i> ${s.phone}</a>` : ''}
+        ${s.parentPhone && s.parentPhone!=='none'
+          ? `<br><a href="https://wa.me/2${s.parentPhone}" target="_blank" style="font-size:0.75rem;color:#25d366"><i class="fab fa-whatsapp"></i> ولي الأمر</a>`
+          : s.phone && s.phone!=='none'
+            ? `<br><a href="https://wa.me/2${s.phone}" target="_blank" style="font-size:0.75rem;color:#25d366"><i class="fab fa-whatsapp"></i> ${s.phone}</a>`
+            : ''}
       </td>
       <td><span class="badge badge-accent" style="font-size:0.75rem">${s.grade}</span></td>
       <td><code style="background:var(--bg-card2);padding:2px 8px;border-radius:4px;font-size:0.85rem">${s.customCode||'-'}</code></td>
@@ -3758,38 +3894,64 @@ function renderReports() {
     const pending = rows.filter(s=>s.phone&&s.phone!=='none'&&!(monthData[s.id]?.dailySent));
     if (!pending.length){content.innerHTML='<div class="empty-state"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>All daily reports sent ✅</p></div>';return;}
     content.innerHTML=`<div class="card" style="padding:0"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Grade</th><th>Phone</th><th>Attendance</th><th>Action</th></tr></thead>
+      <thead><tr><th>الاسم</th><th>المرحلة</th><th>الهاتف</th><th>الحضور</th><th>إرسال</th></tr></thead>
       <tbody>${pending.map(s=>{
         const md=monthData[s.id]||{};const att=countAttendance(md);
-        const msg=encodeURIComponent(`Hello! This is a message from General Academy — Mr. Zeyad Said\n\nStudent: ${s.name}\nDate: ${new Date().toLocaleDateString('en-GB')}\nAttendance today: Session recorded\nTotal attendance: ${att}/8\n\nBest regards 📚`);
+        const sendPhone = s.parentPhone && s.parentPhone!=='none' ? s.parentPhone : s.phone;
+        const msg=encodeURIComponent(`مرحباً، رسالة من General Academy — Mr. Zeyad Said 📚\n\n` +
+          `الطالب: ${s.name}\n` +
+          `التاريخ: ${new Date().toLocaleDateString('ar-EG')}\n` +
+          `تم تسجيل حضور الحصة اليوم ✅\n` +
+          `إجمالي الحضور: ${att}/8\n\n` +
+          `شكراً لمتابعتكم — Mr. Zeyad Said 🎓`);
         return`<tr><td><strong>${s.name}</strong></td><td><span class="badge badge-accent" style="font-size:0.75rem">${s.grade}</span></td>
-          <td>${s.phone}</td><td><span class="badge ${att>0?'badge-success':'badge-danger'}">${att}/8</span></td>
-          <td><a href="https://wa.me/2${s.phone}?text=${msg}" target="_blank" class="btn btn-sm btn-wa" onclick="markDailySent('${s.id}')"><i class="fab fa-whatsapp"></i> Send</a></td></tr>`;
+          <td>${sendPhone}</td><td><span class="badge ${att>0?'badge-success':'badge-danger'}">${att}/8</span></td>
+          <td><a href="https://wa.me/2${sendPhone}?text=${msg}" target="_blank" class="btn btn-sm btn-wa" onclick="markDailySent('${s.id}')"><i class="fab fa-whatsapp"></i> إرسال</a></td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   } else if (currentReportTab==='monthly') {
     const pending = rows.filter(s=>s.phone&&s.phone!=='none'&&!(monthData[s.id]?.monthlySent));
-    if (!pending.length){content.innerHTML='<div class="empty-state"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>All monthly reports sent ✅</p></div>';return;}
+    if (!pending.length){content.innerHTML='<div class="empty-state"><i class="fas fa-check-circle" style="color:var(--success)"></i><p>تم إرسال جميع التقارير الشهرية ✅</p></div>';return;}
     content.innerHTML=`<div class="card" style="padding:0"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Grade</th><th>Attendance</th><th>Score</th><th>Payment</th><th>Action</th></tr></thead>
+      <thead><tr><th>الاسم</th><th>المرحلة</th><th>الحضور</th><th>المجموع</th><th>الدفع</th><th>إرسال</th></tr></thead>
       <tbody>${pending.map(s=>{
         const md=monthData[s.id]||{};const att=countAttendance(md);const score=calcTotalScore(md);
-        const paid=s.type==='private'?(md.paid?'✅ Paid':'❌ Unpaid'):'Center';
-        const msg=encodeURIComponent(`📊 Monthly Report — General Academy\nMr. Zeyad Said — English\n\nStudent: ${s.name}\nGrade: ${s.grade}\nMonth: ${formatMonthLabel(currentMonth)}\nAttendance: ${att}/8\nTotal Score: ${score}\nPayment: ${paid}\n\nThank you for trusting General Academy 🎓`);
+        const paid=s.type==='private'?(md.paid?'✅ مدفوع':'❌ لم يُسدَّد'):'سنتر';
+        const sendPhone = s.parentPhone && s.parentPhone!=='none' ? s.parentPhone : s.phone;
+        const msg=encodeURIComponent(`📊 التقرير الشهري — General Academy\nMr. Zeyad Said — English\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `👤 الطالب: ${s.name}\n` +
+          `🎓 المرحلة: ${s.grade}\n` +
+          `📅 الشهر: ${formatMonthLabel(currentMonth)}\n` +
+          `✅ الحضور: ${att}/8\n` +
+          `📝 المجموع: ${score}\n` +
+          `💳 الدفع: ${paid}\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `شكراً لثقتكم في General Academy 🎓`);
         return`<tr><td><strong>${s.name}</strong></td><td><span class="badge badge-accent" style="font-size:0.75rem">${s.grade}</span></td>
           <td><span class="badge ${att>4?'badge-success':'badge-warning'}">${att}/8</span></td>
           <td>${score}</td><td>${paid}</td>
-          <td><a href="https://wa.me/2${s.phone}?text=${msg}" target="_blank" class="btn btn-sm btn-wa" onclick="markMonthlySent('${s.id}')"><i class="fab fa-whatsapp"></i> Send</a></td></tr>`;
+          <td><a href="https://wa.me/2${sendPhone}?text=${msg}" target="_blank" class="btn btn-sm btn-wa" onclick="markMonthlySent('${s.id}')"><i class="fab fa-whatsapp"></i> إرسال</a></td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   } else if (currentReportTab==='welcome') {
     const newStudents = rows.filter(s=>s.phone&&s.phone!=='none'&&!s.welcomeSent);
-    if (!newStudents.length){content.innerHTML='<div class="empty-state"><i class="fas fa-handshake" style="color:var(--success)"></i><p>All welcome messages sent ✅</p></div>';return;}
+    if (!newStudents.length){content.innerHTML='<div class="empty-state"><i class="fas fa-handshake" style="color:var(--success)"></i><p>تم إرسال جميع رسائل الترحيب ✅</p></div>';return;}
     content.innerHTML=`<div class="card" style="padding:0"><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Grade</th><th>Phone</th><th>Code</th><th>Action</th></tr></thead>
+      <thead><tr><th>الاسم</th><th>المرحلة</th><th>الهاتف</th><th>الكود</th><th>إرسال</th></tr></thead>
       <tbody>${newStudents.map(s=>{
-        const msg=encodeURIComponent(`🎓 Welcome to General Academy!\n\nDear ${s.name},\n\nWe are pleased to welcome you to General Academy — Mr. Zeyad Said's English platform.\n\nYour student code: ${s.customCode||'N/A'}\nGrade: ${s.grade}\n\nWe look forward to a great learning journey together 📚✨`);
+        const sendPhone = s.parentPhone && s.parentPhone!=='none' ? s.parentPhone : s.phone;
+        const msg=encodeURIComponent(`🎓 أهلاً وسهلاً في General Academy!\n\n` +
+          `عزيزي ولي أمر ${s.name}،\n\n` +
+          `يسعدنا انضمام ابنك/ابنتك إلى General Academy — Mr. Zeyad Said للغة الإنجليزية.\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `👤 الطالب: ${s.name}\n` +
+          `🔑 الكود الخاص: ${s.customCode||'—'}\n` +
+          `🎓 المرحلة: ${s.grade}\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n\n` +
+          `نتطلع لرحلة تعليمية رائعة 📚✨\n` +
+          `Mr. Zeyad Said`);
         return`<tr><td><strong>${s.name}</strong></td><td><span class="badge badge-accent" style="font-size:0.75rem">${s.grade}</span></td>
-          <td>${s.phone}</td><td><code>${s.customCode||'-'}</code></td>
-          <td><a href="https://wa.me/2${s.phone}?text=${msg}" target="_blank" class="btn btn-sm btn-wa" onclick="markWelcomeSent('${s.id}')"><i class="fab fa-whatsapp"></i> Send</a></td></tr>`;
+          <td>${sendPhone}</td><td><code>${s.customCode||'-'}</code></td>
+          <td><a href="https://wa.me/2${sendPhone}?text=${msg}" target="_blank" class="btn btn-sm btn-wa" onclick="markWelcomeSent('${s.id}')"><i class="fab fa-whatsapp"></i> إرسال</a></td></tr>`;
       }).join('')}</tbody></table></div></div>`;
   }
 }
@@ -4460,13 +4622,14 @@ function renderStudentAccountsTable() {
   rows.sort((a,b) => (b.createdAt||0) - (a.createdAt||0));
   if (countEl) countEl.textContent = rows.length;
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state" style="padding:24px"><i class="fas fa-user-graduate"></i><p>No registered student accounts yet</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state" style="padding:24px"><i class="fas fa-user-graduate"></i><p>No registered student accounts yet</p></div></td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(a => `
     <tr>
       <td><strong>${a.name||''}</strong></td>
       <td><a href="https://wa.me/2${a.phone}" target="_blank" style="color:#25d366;font-size:0.85rem"><i class="fab fa-whatsapp"></i> ${a.phone||''}</a></td>
+      <td>${a.parentPhone ? `<a href="https://wa.me/2${a.parentPhone}" target="_blank" style="color:#25d366;font-size:0.85rem"><i class="fab fa-whatsapp"></i> ${a.parentPhone}</a>` : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td><span class="badge badge-accent" style="font-size:0.75rem">${a.grade||'—'}</span></td>
       <td><code style="background:var(--bg-card2);padding:2px 8px;border-radius:4px;letter-spacing:1px">${a.code||'—'}</code></td>
       <td style="font-size:0.8rem;color:var(--text-muted)">${a.createdAt ? new Date(a.createdAt).toLocaleDateString('en-GB') : '—'}</td>
